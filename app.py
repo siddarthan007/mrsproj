@@ -5,7 +5,7 @@ from sklearn.neighbors import NearestNeighbors
 
 @st.cache_resource
 def load_models():
-    return joblib.load("models/mrs_model_v11.pkl")
+    return joblib.load("models/mrs_model_v11.pkl.gz")
 
 df, feature_matrix, nn_cosine = load_models()
 
