@@ -138,15 +138,6 @@ if debug_mode and st.session_state['selected_movies']:
         selected_indices = [np.where(movie_ids == mid)[0][0] for mid in st.session_state['selected_movies']]
         rec_indices = get_recommendations(selected_indices, knn_model, feature_matrix, n_recommend=10)
 
-        if 'genres' in df.columns:
-            selected_genres = set()
-            for idx in selected_indices:
-                genres = df.iloc[idx]['genres'].split('|') if isinstance(df.iloc[idx]['genres'], str) else []
-                selected_genres.update(genres)
-            relevant = sum(any(g in selected_genres for g in (df.iloc[idx]['genres'].split('|') if isinstance(df.iloc[idx]['genres'], str) else [])) for idx in rec_indices)
-            precision = relevant / len(rec_indices) if rec_indices else 0
-            st.write(f"**Precision**: {precision:.2f} (fraction of recommendations sharing genres with selected movies)")
-        
         if len(rec_indices) > 1:
             rec_features = feature_matrix[rec_indices]
             sim_matrix = cosine_similarity(rec_features)
