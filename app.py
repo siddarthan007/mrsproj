@@ -211,4 +211,4 @@ if debug_mode and st.session_state['selected_movies']:
                 st.write("No recommendations to inspect.")
 
 st.markdown("<hr>", unsafe_allow_html=True)
-st.markdown('<div style="text-align: center; color: #888;">Built using TMDB dataset and KNN with Cosine similarity.</div>', unsafe_allow_html=True)
+st.markdown('<div style="text-align: center; color: #888;">Built using MovieLens dataset and trained using K-Nearest Neighbors with Cosine similarity as metric.</div>', unsafe_allow_html=True)
