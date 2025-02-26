@@ -5,6 +5,7 @@ import joblib
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics.pairwise import cosine_similarity
 import umap
+import plotly.express as px
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -27,10 +28,14 @@ df, feature_matrix, knn_model, movie_ids = load_data()
 if df is None or feature_matrix is None or knn_model is None:
     st.stop()
 
+@st.cache_resource
 def fetch_poster(poster_path):
-    if poster_path is None or (isinstance(poster_path, float) and np.isnan(poster_path)) or not str(poster_path).strip():
+    if not poster_path or pd.isna(poster_path) or not str(poster_path).strip():
         return "https://upload.wikimedia.org/wikipedia/commons/6/65/No-Image-Placeholder.svg"
-    return f"https://image.tmdb.org/t/p/w500{poster_path}"
+    try:
+        return f"https://image.tmdb.org/t/p/w500{poster_path}"
+    except Exception:
+        return "https://upload.wikimedia.org/wikipedia/commons/6/65/No-Image-Placeholder.svg"
 
 def get_recommendations(selected_indices, nn_model, matrix, n_recommend=10):
     try:
@@ -55,7 +60,7 @@ st.markdown("""
         .sub-title { text-align: center; font-size: 20px; color: #4682B4; }
         .movie-container { display: flex; flex-direction: column; align-items: center; text-align: center; }
         .movie-title { font-size: 16px; font-weight: bold; margin-top: 10px; width: 150px; }
-        .tmdb-button { margin-top: 5px; font-size: 12px; color: #4682B4; }
+        .genres {font-size: 14px; color: #666; margin-top: 2px;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -96,6 +101,11 @@ if not filtered_df.empty:
 
 st.subheader(f"🎥 Selected Movies ({len(st.session_state['selected_movies'])}/5)")
 st.markdown("<hr>", unsafe_allow_html=True)
+
+if st.session_state['selected_movies'] and st.button("🗑️ Clear All"):
+    st.session_state['selected_movies'] = []
+    st.rerun()
+
 if st.session_state['selected_movies']:
     cols = st.columns(5)
     for i, movie_id in enumerate(st.session_state['selected_movies']):
@@ -106,6 +116,7 @@ if st.session_state['selected_movies']:
                 st.markdown('<div class="movie-container">', unsafe_allow_html=True)
                 st.image(poster_url, width=150)
                 st.markdown(f'<div class="movie-title">{movie["title"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="genres">{", ".join(movie["genres"])}</div>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
                 if st.button("❌ Remove", key=f"rem_{i}"):
                     st.session_state['selected_movies'].remove(movie_id)
@@ -122,7 +133,7 @@ if len(st.session_state['selected_movies']) >= 3:
                 st.subheader("🎬 Recommended Movies for You:")
                 st.markdown("<hr>", unsafe_allow_html=True)
                 cols = st.columns(5)
-                for i, idx in enumerate(rec_indices[:10]):
+                for i, (idx, score) in enumerate(zip(rec_indices[:10], rec_scores[:10])):
                     movie = df.iloc[idx]
                     poster_url = fetch_poster(movie['poster_path'])
                     with cols[i % 5]:
@@ -130,6 +141,7 @@ if len(st.session_state['selected_movies']) >= 3:
                             st.markdown('<div class="movie-container">', unsafe_allow_html=True)
                             st.image(poster_url, width=150)
                             st.markdown(f'<div class="movie-title">{movie["title"]}</div>', unsafe_allow_html=True)
+                            st.markdown(f'<div style="font-size: 12px; color: #888;">Score: {score:.2f}</div>', unsafe_allow_html=True)
                             st.markdown('</div>', unsafe_allow_html=True)
 else:
     st.info("Please select at least 3 movies to get recommendations.")
@@ -158,11 +170,41 @@ if debug_mode and st.session_state['selected_movies']:
                     num_selected = len(selected_indices)
                     selected_embedding = embedding[:num_selected]
                     recommended_embedding = embedding[num_selected:]
-                    fig, ax = plt.subplots()
-                    ax.scatter(selected_embedding[:, 0], selected_embedding[:, 1], color='red', label='Selected', s=50)
-                    ax.scatter(recommended_embedding[:, 0], recommended_embedding[:, 1], color='green', label='Recommended', s=50)
-                    ax.legend()
-                    st.pyplot(fig)
+
+                    df_plot = pd.DataFrame({
+                        'x': np.concatenate([selected_embedding[:, 0], recommended_embedding[:, 0]]),
+                        'y': np.concatenate([selected_embedding[:, 1], recommended_embedding[:, 1]]),
+                        'Category': ['Selected'] * num_selected + ['Recommended'] * len(recommended_embedding),
+                        'Title': [df.iloc[i]['title'] for i in combined_indices]
+                    })
+
+                    fig = px.scatter(
+                        df_plot,
+                        x='x',
+                        y='y',
+                        color='Category',
+                        hover_data=['Title'],
+                        color_discrete_map={"Selected": "red", "Recommended": "blue"},
+                        title="Feature Space"
+                    )
+
+                    fig.update_layout(
+                        xaxis_title="X",
+                        yaxis_title="Y",
+                        legend_title="Movie Category",
+                        margin=dict(l=20, r=20, t=50, b=20),
+                        template="plotly_white",
+                        hovermode="closest"
+                    )
+
+                    fig.update_traces(
+                        hovertemplate="<b>%{customdata[0]}</b><br>" +
+                                    "X: %{x:.2f}<br>" +
+                                    "Y: %{y:.2f}<extra></extra>"
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
             
             if st.checkbox("Show Similarity Heatmap", value=False):
                 sim_matrix = cosine_similarity(feature_matrix[selected_indices], feature_matrix[rec_indices])

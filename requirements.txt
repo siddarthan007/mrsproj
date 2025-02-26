@@ -6,3 +6,4 @@ joblib
 git-lfs
 umap-learn
 seaborn
+plotly
