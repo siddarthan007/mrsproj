@@ -28,7 +28,7 @@ if df is None or feature_matrix is None or knn_model is None:
     st.stop()
 
 def fetch_poster(poster_path):
-    if pd.isna(poster_path) or not poster_path:
+    if poster_path is None or (isinstance(poster_path, float) and np.isnan(poster_path)) or not str(poster_path).strip():
         return "https://upload.wikimedia.org/wikipedia/commons/6/65/No-Image-Placeholder.svg"
     return f"https://image.tmdb.org/t/p/w500{poster_path}"
 
@@ -38,14 +38,16 @@ def get_recommendations(selected_indices, nn_model, matrix, n_recommend=10):
         score_dict = {}
         for dist, idx in zip(distances, indices):
             for d, i in zip(dist, idx):
-                if i not in selected_indices:  
+                if i not in selected_indices:
                     similarity = 1 - d
                     score_dict[i] = score_dict.get(i, 0) + similarity
         sorted_scores = sorted(score_dict.items(), key=lambda x: x[1], reverse=True)
-        return [item[0] for item in sorted_scores[:n_recommend]]
+        rec_indices = [item[0] for item in sorted_scores[:n_recommend]]
+        rec_scores = [item[1] for item in sorted_scores[:n_recommend]]
+        return rec_indices, rec_scores
     except Exception as e:
         st.error(f"Error generating recommendations: {e}")
-        return []
+        return [], []
 
 st.markdown("""
     <style>
@@ -115,7 +117,7 @@ if len(st.session_state['selected_movies']) >= 3:
     if st.button("🎯 Get Recommendations", use_container_width=True):
         with st.spinner("Generating recommendations..."):
             selected_indices = [np.where(movie_ids == mid)[0][0] for mid in st.session_state['selected_movies']]
-            rec_indices = get_recommendations(selected_indices, knn_model, feature_matrix)
+            rec_indices, rec_scores = get_recommendations(selected_indices, knn_model, feature_matrix)
             if rec_indices:
                 st.subheader("🎬 Recommended Movies for You:")
                 st.markdown("<hr>", unsafe_allow_html=True)
@@ -136,18 +138,19 @@ if debug_mode and st.session_state['selected_movies']:
     with st.sidebar:
         st.subheader("Debug Information")
         selected_indices = [np.where(movie_ids == mid)[0][0] for mid in st.session_state['selected_movies']]
-        rec_indices = get_recommendations(selected_indices, knn_model, feature_matrix, n_recommend=10)
-
-        if len(rec_indices) > 1:
-            rec_features = feature_matrix[rec_indices]
-            sim_matrix = cosine_similarity(rec_features)
-            diversity = 1 - sim_matrix.mean()
-            st.write(f"**Diversity**: {diversity:.2f} (average dissimilarity between recommendations)")
-        else:
-            st.write("**Diversity**: N/A (insufficient recommendations)")
-
-        if st.checkbox("Visualize Feature Space", value=False):
-            with st.spinner("Generating 2D projection..."):
+        rec_indices, rec_scores = get_recommendations(selected_indices, knn_model, feature_matrix, n_recommend=10)
+        
+        with st.expander("Diversity and Visualizations"):
+            if len(rec_indices) > 1:
+                rec_features = feature_matrix[rec_indices]
+                sim_matrix = cosine_similarity(rec_features)
+                diversity = 1 - sim_matrix.mean()
+                st.write(f"**Diversity**: {diversity:.2f} (average dissimilarity between recommendations)")
+            else:
+                st.write("**Diversity**: N/A (insufficient recommendations)")
+            
+            if st.checkbox("Visualize Feature Space", value=False):
+                with st.spinner("Generating 2D projection..."):
                     combined_indices = selected_indices + rec_indices
                     relevant_features = feature_matrix[combined_indices]
                     reducer = umap.UMAP(random_state=42)
@@ -160,14 +163,52 @@ if debug_mode and st.session_state['selected_movies']:
                     ax.scatter(recommended_embedding[:, 0], recommended_embedding[:, 1], color='green', label='Recommended', s=50)
                     ax.legend()
                     st.pyplot(fig)
+            
+            if st.checkbox("Show Similarity Heatmap", value=False):
+                sim_matrix = cosine_similarity(feature_matrix[selected_indices], feature_matrix[rec_indices])
+                fig, ax = plt.subplots()
+                sns.heatmap(sim_matrix, annot=True, cmap="YlGnBu", ax=ax)
+                ax.set_xticklabels([df.iloc[idx]['title'][:15] + '...' for idx in rec_indices], rotation=45, ha='right')
+                ax.set_yticklabels([df.iloc[idx]['title'][:15] + '...' for idx in selected_indices], rotation=0)
+                st.pyplot(fig)
 
-        if st.checkbox("Show Similarity Heatmap", value=False):
-            sim_matrix = cosine_similarity(feature_matrix[selected_indices], feature_matrix[rec_indices])
-            fig, ax = plt.subplots()
-            sns.heatmap(sim_matrix, annot=True, cmap="YlGnBu", ax=ax)
-            ax.set_xticklabels([df.iloc[idx]['title'][:15] + '...' for idx in rec_indices], rotation=45, ha='right')
-            ax.set_yticklabels([df.iloc[idx]['title'][:15] + '...' for idx in selected_indices], rotation=0)
-            st.pyplot(fig)
+        with st.expander("Selected Movies Similarity"):
+            if len(selected_indices) >= 2:
+                selected_features = feature_matrix[selected_indices]
+                sim_matrix_selected = cosine_similarity(selected_features)
+                avg_sim_selected = (sim_matrix_selected.sum() - np.trace(sim_matrix_selected)) / (len(selected_indices) * (len(selected_indices) - 1))
+                st.write(f"**Average similarity among selected movies:** {avg_sim_selected:.4f}")
+            else:
+                st.write("Need at least two selected movies to compute similarity.")
+        
+        with st.expander("Recommendation Scores"):
+            if rec_indices:
+                rec_movies = df.iloc[rec_indices][['title']]
+                rec_movies['Total Similarity'] = rec_scores
+                rec_movies['Average Similarity'] = rec_movies['Total Similarity'] / len(selected_indices)
+                st.write("**Recommended Movies with Similarity Scores:**")
+                st.dataframe(rec_movies.style.format({"Total Similarity": "{:.4f}", "Average Similarity": "{:.4f}"}))
+                avg_rec_similarity = np.mean(rec_movies['Average Similarity'])
+                st.write(f"**Average similarity of recommendations:** {avg_rec_similarity:.4f}")
+            else:
+                st.write("No recommendations generated yet.")
+        
+        with st.expander("Inspect Recommended Movie"):
+            if rec_indices:
+                rec_titles = [df.iloc[idx]['title'] for idx in rec_indices]
+                selected_rec = st.selectbox("Select a recommended movie:", options=rec_titles)
+                rec_idx = rec_indices[rec_titles.index(selected_rec)]
+                rec_feature = feature_matrix[rec_idx].reshape(1, -1)
+                similarities = cosine_similarity(rec_feature, feature_matrix[selected_indices])[0]
+                sim_df = pd.DataFrame({
+                    "Selected Movie": [df.iloc[idx]['title'] for idx in selected_indices],
+                    "Similarity": similarities
+                })
+                sim_df = sim_df.sort_values(by="Similarity", ascending=False)
+                st.write(f"**Similarities to {selected_rec}:**")
+                st.dataframe(sim_df.style.format({"Similarity": "{:.4f}"}))
+            else:
+                st.write("No recommendations to inspect.")
 
 st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown('<div style="text-align: center; color: #888;">Built using TMDB dataset and KNN with Cosine similarity.</div>', unsafe_allow_html=True)
