@@ -15,11 +15,7 @@ st.set_page_config(page_title="Movie Recommendation System", layout="centered")
 def load_data():
     try:
         save_dict = joblib.load("models/recommender_model.joblib")  
-        df = save_dict['df']  
-        feature_matrix = save_dict['feature_matrix']  
-        knn_model = save_dict['knn_model']  
-        movie_ids = save_dict['movie_ids']  
-        return df, feature_matrix, knn_model, movie_ids
+        return save_dict['df'], save_dict['feature_matrix'], save_dict['knn_model'], save_dict['movie_ids']  
     except Exception as e:
         st.error(f"Error loading model: {e}")
         return None, None, None, None
@@ -28,18 +24,15 @@ df, feature_matrix, knn_model, movie_ids = load_data()
 if df is None or feature_matrix is None or knn_model is None:
     st.stop()
 
-@st.cache_resource
 def fetch_poster(poster_path):
-    if not poster_path or pd.isna(poster_path) or not str(poster_path).strip():
+    if not poster_path or pd.isna(poster_path):
         return "https://upload.wikimedia.org/wikipedia/commons/6/65/No-Image-Placeholder.svg"
-    try:
-        return f"https://image.tmdb.org/t/p/w500{poster_path}"
-    except Exception:
-        return "https://upload.wikimedia.org/wikipedia/commons/6/65/No-Image-Placeholder.svg"
+    return f"https://image.tmdb.org/t/p/w500{poster_path}"
 
-def get_recommendations(selected_indices, nn_model, matrix, n_recommend=10):
+@st.cache_data
+def get_recommendations(selected_indices, _nn_model, matrix, n_recommend=10):
     try:
-        distances, indices = nn_model.kneighbors(matrix[selected_indices])
+        distances, indices = _nn_model.kneighbors(matrix[selected_indices])
         score_dict = {}
         for dist, idx in zip(distances, indices):
             for d, i in zip(dist, idx):
@@ -74,10 +67,7 @@ if 'selected_movies' not in st.session_state:
     st.session_state['selected_movies'] = []
 
 search_query = st.text_input("Search for a movie:", placeholder="Type a movie name...")
-if search_query:
-    filtered_df = df[df['title'].str.contains(search_query, case=False, na=False)].head(20)
-else:
-    filtered_df = pd.DataFrame()
+filtered_df = df[df['title'].str.contains(search_query, case=False, na=False)].head(20) if search_query else pd.DataFrame()
 
 if not filtered_df.empty:
     st.subheader("🔍 Search Results")
@@ -107,7 +97,7 @@ if st.session_state['selected_movies'] and st.button("🗑️ Clear All"):
     st.rerun()
 
 if st.session_state['selected_movies']:
-    cols = st.columns(5)
+    cols = st.columns(min(len(st.session_state['selected_movies']), 5))
     for i, movie_id in enumerate(st.session_state['selected_movies']):
         movie = df[df['movieId'] == movie_id].iloc[0]
         poster_url = fetch_poster(movie['poster_path'])
